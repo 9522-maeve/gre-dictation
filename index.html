@@ -525,20 +525,11 @@
     for (const line of lines) {
       const trimmed = line.trim();
       if (!trimmed) continue;
-      let parts = null;
-      if (trimmed.includes('\t')) {
-        parts = trimmed.split('\t');
-      } else if (trimmed.includes(',')) {
-        parts = trimmed.split(',');
-      } else if (trimmed.includes('，')) {
-        parts = trimmed.split('，');
-      } else {
-        const m = trimmed.match(/^(\S+)\s+(.*)$/);
-        if (m) parts = [m[1], m[2]];
-      }
-      if (parts && parts.length >= 2) {
-        const en = parts[0].trim();
-        const cn = parts.slice(1).join(' ').trim();
+      // Split by first whitespace only — keep multi-word Chinese intact
+      const m = trimmed.match(/^(\S+)\s+(.*)$/);
+      if (m) {
+        const en = m[1].trim();
+        const cn = m[2].trim();
         if (en && cn) words.push({ en, cn });
       }
     }
@@ -654,13 +645,11 @@
     const u = user.replace(/\s+/g, '').toLowerCase();
     const e = expected.replace(/\s+/g, '').toLowerCase();
     if (u === e) return true;
-    const parts = expected.split(/[\/；;]/);
+    // Split by ；，,/ to allow matching any single meaning
+    const parts = expected.split(/[；;，,、\/]/);
     for (const p of parts) {
-      if (u === p.replace(/\s+/g, '').toLowerCase()) return true;
-    }
-    const enParts = expected.split(/[,，]/);
-    for (const p of enParts) {
-      if (u === p.replace(/\s+/g, '').toLowerCase()) return true;
+      const clean = p.replace(/\s+/g, '').toLowerCase();
+      if (clean && u === clean) return true;
     }
     return false;
   }
