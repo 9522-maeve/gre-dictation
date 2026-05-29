@@ -1,0 +1,574 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>随机默写 - 背单词</title>
+<style>
+  :root {
+    --bg: #f5f5f5;
+    --card: #fff;
+    --text: #333;
+    --muted: #999;
+    --accent: #4f46e5;
+    --accent-hover: #4338ca;
+    --success: #16a34a;
+    --danger: #dc2626;
+    --border: #e5e7eb;
+    --shadow: 0 1px 3px rgba(0,0,0,.08), 0 1px 2px rgba(0,0,0,.06);
+    --radius: 12px;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    min-height: 100vh;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    padding: 20px;
+  }
+  .app { width: 100%; max-width: 480px; }
+
+  /* Upload zone */
+  .upload-zone {
+    background: var(--card);
+    border: 2px dashed var(--border);
+    border-radius: var(--radius);
+    padding: 48px 24px;
+    text-align: center;
+    cursor: pointer;
+    transition: border-color .2s, background .2s;
+  }
+  .upload-zone:hover, .upload-zone.dragover {
+    border-color: var(--accent);
+    background: #f8f7ff;
+  }
+  .upload-zone .icon { font-size: 40px; margin-bottom: 12px; }
+  .upload-zone h2 { font-size: 18px; margin-bottom: 6px; }
+  .upload-zone p { color: var(--muted); font-size: 14px; }
+  .upload-zone input { display: none; }
+
+  .saved-info {
+    margin-top: 16px;
+    padding: 10px 16px;
+    background: #f0fdf4;
+    border-radius: 8px;
+    font-size: 13px;
+    color: var(--success);
+  }
+  .saved-info button {
+    margin-left: 8px;
+    padding: 4px 10px;
+    font-size: 12px;
+    border: 1px solid var(--success);
+    border-radius: 4px;
+    background: transparent;
+    color: var(--success);
+    cursor: pointer;
+  }
+  .saved-info button:hover { background: var(--success); color: #fff; }
+  .saved-info button.danger { border-color: var(--danger); color: var(--danger); }
+  .saved-info button.danger:hover { background: var(--danger); color: #fff; }
+
+  /* Config bar */
+  .config {
+    background: var(--card);
+    border-radius: var(--radius);
+    padding: 16px 20px;
+    margin-bottom: 16px;
+    box-shadow: var(--shadow);
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    flex-wrap: wrap;
+  }
+  .config label { font-size: 13px; color: var(--muted); white-space: nowrap; }
+  .config select {
+    padding: 6px 10px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    font-size: 14px;
+    background: var(--card);
+    cursor: pointer;
+  }
+  .config .book-name {
+    flex: 1;
+    font-size: 14px;
+    font-weight: 600;
+    min-width: 100px;
+    text-align: right;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .config .btn-sm {
+    padding: 6px 14px;
+    font-size: 13px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: var(--card);
+    cursor: pointer;
+    white-space: nowrap;
+  }
+  .config .btn-sm:hover { background: var(--bg); }
+
+  /* Quiz card */
+  .quiz-card {
+    background: var(--card);
+    border-radius: var(--radius);
+    padding: 40px 24px;
+    box-shadow: var(--shadow);
+    text-align: center;
+  }
+  .quiz-card .prompt-label {
+    font-size: 13px;
+    color: var(--muted);
+    margin-bottom: 8px;
+  }
+  .quiz-card .prompt-word {
+    font-size: 36px;
+    font-weight: 700;
+    margin-bottom: 24px;
+    word-break: break-all;
+  }
+  .quiz-card input {
+    width: 100%;
+    padding: 12px 16px;
+    font-size: 20px;
+    border: 2px solid var(--border);
+    border-radius: 8px;
+    text-align: center;
+    outline: none;
+    transition: border-color .2s;
+  }
+  .quiz-card input:focus { border-color: var(--accent); }
+  .quiz-card input.correct { border-color: var(--success); background: #f0fdf4; }
+  .quiz-card input.wrong { border-color: var(--danger); background: #fef2f2; }
+
+  .result {
+    margin-top: 16px;
+    font-size: 15px;
+    min-height: 24px;
+  }
+  .result .correct-answer { color: var(--success); font-weight: 600; }
+  .result .wrong-hint { color: var(--danger); }
+
+  .btn {
+    display: inline-block;
+    padding: 12px 32px;
+    font-size: 16px;
+    font-weight: 600;
+    border: none;
+    border-radius: 8px;
+    cursor: pointer;
+    transition: background .2s;
+  }
+  .btn-primary { background: var(--accent); color: #fff; margin-top: 20px; }
+  .btn-primary:hover { background: var(--accent-hover); }
+
+  /* Stats */
+  .stats {
+    display: flex;
+    justify-content: center;
+    gap: 24px;
+    margin: 16px 0;
+  }
+  .stat { text-align: center; }
+  .stat .num { font-size: 28px; font-weight: 700; }
+  .stat .label { font-size: 12px; color: var(--muted); }
+  .stat.good .num { color: var(--success); }
+  .stat.bad .num { color: var(--danger); }
+
+  /* Progress */
+  .progress-bar {
+    height: 4px;
+    background: var(--border);
+    border-radius: 2px;
+    margin-top: 16px;
+    overflow: hidden;
+  }
+  .progress-bar .fill {
+    height: 100%;
+    background: var(--accent);
+    border-radius: 2px;
+    transition: width .3s;
+  }
+
+  .hidden { display: none !important; }
+
+  .delim-hint { font-size: 12px; color: var(--muted); margin-top: 8px; }
+</style>
+</head>
+<body>
+
+<div class="app">
+  <!-- Upload -->
+  <div class="upload-zone" id="uploadZone">
+    <div class="icon">📂</div>
+    <h2>点击上传词书</h2>
+    <p>支持 .txt 文件，每行一个单词</p>
+    <p class="delim-hint">格式：<b>英文 中文</b>（空格 / Tab / 逗号分隔均可）</p>
+    <div class="saved-info hidden" id="savedInfo">
+      上次上传了 <b id="savedName"></b>（<span id="savedCount"></span> 词）
+      <button id="btnResume">继续背诵</button>
+      <button class="danger" id="btnClear">清除</button>
+    </div>
+    <input type="file" id="fileInput" accept=".txt">
+  </div>
+
+  <!-- Quiz area (hidden initially) -->
+  <div id="quizArea" class="hidden">
+    <div class="config">
+      <label>默写方向</label>
+      <select id="direction">
+        <option value="en2cn">看英文 → 写中文</option>
+        <option value="cn2en">看中文 → 写英文</option>
+      </select>
+      <span class="book-name" id="bookName"></span>
+      <button class="btn-sm" id="btnReset">换词书</button>
+    </div>
+
+    <div class="quiz-card">
+      <div class="prompt-label" id="promptLabel">写出对应的中文</div>
+      <div class="prompt-word" id="promptWord"></div>
+      <input type="text" id="answerInput" placeholder="在这里输入你的答案…" autocomplete="off" autocapitalize="off">
+      <div class="result" id="result"></div>
+      <button class="btn btn-primary" id="btnNext">下一题</button>
+      <div class="progress-bar"><div class="fill" id="progressFill" style="width:0%"></div></div>
+    </div>
+
+    <div class="stats">
+      <div class="stat good"><span class="num" id="correctCount">0</span><div class="label">正确</div></div>
+      <div class="stat bad"><span class="num" id="wrongCount">0</span><div class="label">错误</div></div>
+      <div class="stat"><span class="num" id="remainCount">0</span><div class="label">剩余</div></div>
+    </div>
+  </div>
+</div>
+
+<script>
+(function() {
+  const STORAGE_KEY = 'dictation_words';
+  const STORAGE_NAME = 'dictation_bookname';
+
+  const uploadZone = document.getElementById('uploadZone');
+  const fileInput = document.getElementById('fileInput');
+  const savedInfo = document.getElementById('savedInfo');
+  const savedName = document.getElementById('savedName');
+  const savedCount = document.getElementById('savedCount');
+  const btnResume = document.getElementById('btnResume');
+  const btnClear = document.getElementById('btnClear');
+  const quizArea = document.getElementById('quizArea');
+  const direction = document.getElementById('direction');
+  const bookName = document.getElementById('bookName');
+  const promptLabel = document.getElementById('promptLabel');
+  const promptWord = document.getElementById('promptWord');
+  const answerInput = document.getElementById('answerInput');
+  const result = document.getElementById('result');
+  const btnNext = document.getElementById('btnNext');
+  const btnReset = document.getElementById('btnReset');
+  const progressFill = document.getElementById('progressFill');
+  const correctCount = document.getElementById('correctCount');
+  const wrongCount = document.getElementById('wrongCount');
+  const remainCount = document.getElementById('remainCount');
+
+  let words = [];
+  let queue = [];
+  let currentIdx = -1;
+  let correct = 0;
+  let wrong = 0;
+  let answered = false;
+
+  // --- localStorage ---
+  function saveToStorage() {
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(words));
+      localStorage.setItem(STORAGE_NAME, bookName.textContent);
+    } catch(e) {}
+  }
+
+  function loadFromStorage() {
+    try {
+      const data = localStorage.getItem(STORAGE_KEY);
+      const name = localStorage.getItem(STORAGE_NAME);
+      if (data && name) {
+        words = JSON.parse(data);
+        savedName.textContent = name;
+        savedCount.textContent = words.length;
+        savedInfo.classList.remove('hidden');
+      }
+    } catch(e) {}
+  }
+
+  function clearStorage() {
+    localStorage.removeItem(STORAGE_KEY);
+    localStorage.removeItem(STORAGE_NAME);
+    savedInfo.classList.add('hidden');
+  }
+
+  // --- Upload handling ---
+  uploadZone.addEventListener('click', () => fileInput.click());
+  uploadZone.addEventListener('dragover', e => { e.preventDefault(); uploadZone.classList.add('dragover'); });
+  uploadZone.addEventListener('dragleave', () => uploadZone.classList.remove('dragover'));
+  uploadZone.addEventListener('drop', e => {
+    e.preventDefault();
+    uploadZone.classList.remove('dragover');
+    const file = e.dataTransfer.files[0];
+    if (file) processFile(file);
+  });
+  fileInput.addEventListener('change', () => {
+    const file = fileInput.files[0];
+    if (file) processFile(file);
+  });
+
+  btnResume.addEventListener('click', () => {
+    bookName.textContent = savedName.textContent;
+    startQuiz();
+  });
+
+  btnClear.addEventListener('click', () => {
+    if (confirm('确定要清除已保存的词书吗？')) {
+      clearStorage();
+    }
+  });
+
+  function processFile(file) {
+    if (!file.name.endsWith('.txt')) {
+      alert('请上传 .txt 文件');
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = function() {
+      parseWords(reader.result, file.name);
+    };
+    reader.readAsText(file, 'UTF-8');
+  }
+
+  function parseWords(text, filename) {
+    words = [];
+    const lines = text.split(/\r?\n/);
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (!trimmed) continue;
+
+      let parts = null;
+      if (trimmed.includes('\t')) {
+        parts = trimmed.split('\t');
+      } else if (trimmed.includes(',')) {
+        parts = trimmed.split(',');
+      } else if (trimmed.includes('，')) {
+        parts = trimmed.split('，');
+      } else {
+        // Split by first whitespace only — keep multi-word Chinese meanings intact
+        const m = trimmed.match(/^(\S+)\s+(.*)$/);
+        if (m) {
+          parts = [m[1], m[2]];
+        }
+      }
+
+      if (parts && parts.length >= 2) {
+        const en = parts[0].trim();
+        const cn = parts.slice(1).join(' ').trim();
+        if (en && cn) {
+          words.push({ en, cn });
+        }
+      }
+    }
+
+    if (words.length === 0) {
+      alert('未能从文件中解析出单词。请确保格式为：英文 中文（每行一个）');
+      return;
+    }
+
+    bookName.textContent = filename;
+    saveToStorage();
+    startQuiz();
+  }
+
+  function startQuiz() {
+    uploadZone.classList.add('hidden');
+    quizArea.classList.remove('hidden');
+    resetQueue();
+  }
+
+  function resetQueue() {
+    queue = Array.from({ length: words.length }, (_, i) => i);
+    for (let i = queue.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [queue[i], queue[j]] = [queue[j], queue[i]];
+    }
+    correct = 0;
+    wrong = 0;
+    answered = false;
+    updateStats();
+    nextWord();
+  }
+
+  function nextWord() {
+    if (queue.length === 0) {
+      promptWord.textContent = '🎉';
+      promptLabel.textContent = '全部默写完成！';
+      answerInput.classList.add('hidden');
+      btnNext.textContent = '再来一轮';
+      result.innerHTML = `<span class="correct-answer">正确 ${correct} / ${correct + wrong}</span>`;
+      progressFill.style.width = '100%';
+      remainCount.textContent = '0';
+      answered = true;
+      return;
+    }
+
+    answered = false;
+    currentIdx = queue.pop();
+    const word = words[currentIdx];
+
+    if (direction.value === 'en2cn') {
+      promptWord.textContent = word.en;
+      promptLabel.textContent = '写出对应的中文';
+    } else {
+      promptWord.textContent = word.cn;
+      promptLabel.textContent = '写出对应的英文';
+    }
+
+    answerInput.value = '';
+    answerInput.className = '';
+    answerInput.classList.remove('hidden');
+    answerInput.focus();
+    result.innerHTML = '';
+    btnNext.textContent = '跳过';
+    btnNext.classList.remove('hidden');
+    updateStats();
+    updateProgress();
+  }
+
+  function checkAnswer() {
+    if (answered) return;
+    const raw = answerInput.value.trim();
+    if (!raw) return;
+
+    answered = true;
+    const word = words[currentIdx];
+    let expected, userAnswer;
+
+    if (direction.value === 'en2cn') {
+      expected = word.cn;
+      userAnswer = raw;
+    } else {
+      expected = word.en;
+      userAnswer = raw.toLowerCase();
+    }
+
+    const isCorrect = isMatch(userAnswer, expected);
+
+    if (isCorrect) {
+      answerInput.className = 'correct';
+      result.innerHTML = '<span class="correct-answer">✓ 正确！</span>';
+      correct++;
+    } else {
+      answerInput.className = 'wrong';
+      result.innerHTML = `<span class="wrong-hint">✗ 错误</span> &nbsp; 正确答案：<span class="correct-answer">${escapeHtml(expected)}</span>`;
+      wrong++;
+    }
+
+    btnNext.textContent = '下一题';
+    updateStats();
+  }
+
+  function isMatch(user, expected) {
+    const u = user.replace(/\s+/g, '').toLowerCase();
+    const e = expected.replace(/\s+/g, '').toLowerCase();
+    if (u === e) return true;
+
+    // Split expected by / or ； to allow alternative answers
+    const parts = expected.split(/[\/；;]/);
+    for (const p of parts) {
+      if (u === p.replace(/\s+/g, '').toLowerCase()) return true;
+    }
+
+    // For English, allow comma-separated alternatives
+    const enParts = expected.split(/[,，]/);
+    for (const p of enParts) {
+      if (u === p.replace(/\s+/g, '').toLowerCase()) return true;
+    }
+
+    return false;
+  }
+
+  function skipWord() {
+    if (answered) return;
+    answered = true;
+    const word = words[currentIdx];
+    const expected = direction.value === 'en2cn' ? word.cn : word.en;
+    answerInput.className = 'wrong';
+    result.innerHTML = `正确答案：<span class="correct-answer">${escapeHtml(expected)}</span>`;
+    wrong++;
+    btnNext.textContent = '下一题';
+    updateStats();
+  }
+
+  function updateStats() {
+    correctCount.textContent = correct;
+    wrongCount.textContent = wrong;
+    remainCount.textContent = queue.length;
+  }
+
+  function updateProgress() {
+    const total = words.length;
+    const done = correct + wrong;
+    progressFill.style.width = total > 0 ? (done / total * 100) + '%' : '0%';
+  }
+
+  function escapeHtml(s) {
+    const div = document.createElement('div');
+    div.textContent = s;
+    return div.innerHTML;
+  }
+
+  // --- Events ---
+  answerInput.addEventListener('keydown', function(e) {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      if (!answered) {
+        checkAnswer();
+      } else {
+        nextWord();
+      }
+    }
+  });
+
+  btnNext.addEventListener('click', function() {
+    if (!answered) {
+      const raw = answerInput.value.trim();
+      if (raw) {
+        checkAnswer();
+      } else {
+        skipWord();
+      }
+    } else {
+      if (queue.length === 0 && answered) {
+        resetQueue();
+        return;
+      }
+      nextWord();
+    }
+  });
+
+  direction.addEventListener('change', function() {
+    resetQueue();
+  });
+
+  btnReset.addEventListener('click', function() {
+    words = [];
+    queue = [];
+    clearStorage();
+    uploadZone.classList.remove('hidden');
+    quizArea.classList.add('hidden');
+    fileInput.value = '';
+  });
+
+  // --- Init ---
+  loadFromStorage();
+})();
+</script>
+</body>
+</html>
