@@ -229,6 +229,25 @@
   .btn-clear-all { background: transparent; border: 1px solid var(--danger); color: var(--danger); }
   .btn-clear-all:hover { background: #fef2f2; }
 
+  /* ===== Multiple Choice ===== */
+  .choices { display: flex; flex-direction: column; gap: 10px; margin-bottom: 20px; }
+  .choice-btn {
+    width: 100%; padding: 14px 16px; font-size: 16px;
+    border: 2px solid var(--border); border-radius: 8px;
+    background: var(--card); cursor: pointer;
+    transition: border-color .15s, background .15s, transform .1s;
+    text-align: center; position: relative;
+  }
+  .choice-btn:hover { border-color: var(--accent); background: #f8f7ff; transform: translateY(-1px); }
+  .choice-btn:active { transform: translateY(0); }
+  .choice-btn.correct { border-color: var(--success); background: #f0fdf4; }
+  .choice-btn.wrong { border-color: var(--danger); background: #fef2f2; }
+  .choice-btn .choice-en {
+    display: none; font-size: 13px; color: var(--muted); margin-top: 4px;
+  }
+  .choice-btn.revealed .choice-en { display: block; }
+  .choice-btn.revealed { pointer-events: none; }
+
   .hidden { display: none !important; }
 </style>
 </head>
@@ -273,6 +292,7 @@
       <div class="prompt-label" id="promptLabel">写出对应的中文</div>
       <div class="prompt-word" id="promptWord"></div>
       <input type="text" id="answerInput" placeholder="在这里输入你的答案…" autocomplete="off" autocapitalize="off">
+      <div class="choices hidden" id="choicesContainer"></div>
       <div class="result" id="result"></div>
       <button class="btn btn-primary" id="btnNext">下一题</button>
       <div class="progress-bar"><div class="fill" id="progressFill" style="width:0%"></div></div>
@@ -326,6 +346,7 @@
   const promptLabel = document.getElementById('promptLabel');
   const promptWord = document.getElementById('promptWord');
   const answerInput = document.getElementById('answerInput');
+  const choicesContainer = document.getElementById('choicesContainer');
   const result = document.getElementById('result');
   const btnNext = document.getElementById('btnNext');
   const btnReset = document.getElementById('btnReset');
@@ -347,6 +368,7 @@
   let correct = 0;
   let wrong = 0;
   let answered = false;
+  let correctChoiceIdx = -1;
   let isReviewMode = false;
 
   // ===== Splash Screen =====
@@ -456,8 +478,7 @@
   btnReview.addEventListener('click', function() {
     const errs = getErrors();
     if (errs.length === 0) { alert('错题本为空'); return; }
-    // Replace words with error bank for review
-    words = errs.slice(); // copy
+    words = errs.slice();
     isReviewMode = true;
     bookName.textContent = '错题复习';
     closeErrBank();
@@ -525,7 +546,6 @@
     for (const line of lines) {
       const trimmed = line.trim();
       if (!trimmed) continue;
-      // Split by first whitespace only — keep multi-word Chinese intact
       const m = trimmed.match(/^(\S+)\s+(.*)$/);
       if (m) {
         const en = m[1].trim();
@@ -551,11 +571,9 @@
   }
 
   function resetQueue() {
-    // Pick ROUND_SIZE random words (or all if fewer)
     const pool = words.length;
     const count = Math.min(ROUND_SIZE, pool);
     const indices = Array.from({ length: pool }, (_, i) => i);
-    // Fisher-Yates partial shuffle
     for (let i = 0; i < count; i++) {
       const j = i + Math.floor(Math.random() * (pool - i));
       [indices[i], indices[j]] = [indices[j], indices[i]];
@@ -571,12 +589,12 @@
 
   function nextWord() {
     if (queue.length === 0) {
-      // Round complete
       promptWord.textContent = '🎉';
       const total = correct + wrong;
       const pct = total > 0 ? Math.round(correct / total * 100) : 0;
       promptLabel.textContent = isReviewMode ? '错题复习完成！' : '本轮默写完成！';
       answerInput.classList.add('hidden');
+      choicesContainer.classList.add('hidden');
       btnNext.textContent = isReviewMode ? '再来一轮错题' : '再来一轮';
       result.innerHTML = `<span class="correct-answer">正确 ${correct} / ${total}（${pct}%）</span>`;
       progressFill.style.width = '100%';
@@ -589,23 +607,100 @@
     currentIdx = queue.pop();
     const word = words[currentIdx];
 
+    choicesContainer.innerHTML = '';
+    choicesContainer.classList.add('hidden');
+    result.innerHTML = '';
+
     if (direction.value === 'en2cn') {
       promptWord.textContent = word.en;
-      promptLabel.textContent = '写出对应的中文';
+      promptLabel.textContent = '选择对应的中文';
+      answerInput.classList.add('hidden');
+      generateChoices(word);
     } else {
       promptWord.textContent = word.cn;
       promptLabel.textContent = '写出对应的英文';
+      answerInput.value = '';
+      answerInput.className = '';
+      answerInput.classList.remove('hidden');
+      answerInput.focus();
     }
 
-    answerInput.value = '';
-    answerInput.className = '';
-    answerInput.classList.remove('hidden');
-    answerInput.focus();
-    result.innerHTML = '';
     btnNext.textContent = '跳过';
     btnNext.classList.remove('hidden');
     updateStats();
     updateProgress();
+  }
+
+  function generateChoices(correctWord) {
+    choicesContainer.classList.remove('hidden');
+    const choices = [
+      { en: correctWord.en, cn: correctWord.cn, isCorrect: true }
+    ];
+
+    // Pick 3 random wrong definitions from other words
+    const others = words.filter(w => w.en !== correctWord.en);
+    const pool = others.length >= 3 ? others : words.filter(w => w.en !== correctWord.en || w.cn !== correctWord.cn);
+    const shuffledOthers = pool.slice().sort(() => Math.random() - 0.5);
+
+    for (const w of shuffledOthers) {
+      if (choices.length >= 4) break;
+      // Avoid duplicate Chinese definitions
+      if (!choices.some(c => c.cn === w.cn)) {
+        choices.push({ en: w.en, cn: w.cn, isCorrect: false });
+      }
+    }
+
+    // If we still don't have 4 (pool too small), reuse with suffix
+    while (choices.length < 4) {
+      choices.push({ en: '—', cn: '（无其他选项）', isCorrect: false });
+    }
+
+    // Shuffle choice order
+    choices.sort(() => Math.random() - 0.5);
+    correctChoiceIdx = choices.findIndex(c => c.isCorrect);
+
+    choicesContainer.innerHTML = choices.map((c, i) =>
+      `<button class="choice-btn" data-idx="${i}">
+        <div>${escapeHtml(c.cn)}</div>
+        <div class="choice-en">${escapeHtml(c.en)}</div>
+      </button>`
+    ).join('');
+
+    choicesContainer.querySelectorAll('.choice-btn').forEach(btn => {
+      btn.addEventListener('click', function() {
+        if (answered) return;
+        const ci = parseInt(this.dataset.idx);
+        selectChoice(ci, choices);
+      });
+    });
+  }
+
+  function selectChoice(ci, choices) {
+    answered = true;
+    const word = words[currentIdx];
+    const isCorrect = choices[ci].isCorrect;
+
+    const buttons = choicesContainer.querySelectorAll('.choice-btn');
+    buttons.forEach((btn, i) => {
+      btn.classList.add('revealed');
+      if (choices[i].isCorrect) {
+        btn.classList.add('correct');
+      } else if (i === ci && !isCorrect) {
+        btn.classList.add('wrong');
+      }
+    });
+
+    if (isCorrect) {
+      result.innerHTML = '<span class="correct-answer">✓ 正确！</span>';
+      correct++;
+    } else {
+      result.innerHTML = `<span class="wrong-hint">✗ 错误</span> &nbsp; 正确答案：<span class="correct-answer">${escapeHtml(word.cn)}</span>`;
+      wrong++;
+      addErrors([{ en: word.en, cn: word.cn }]);
+    }
+
+    btnNext.textContent = '下一题';
+    updateStats();
   }
 
   function checkAnswer() {
@@ -615,14 +710,9 @@
 
     answered = true;
     const word = words[currentIdx];
-    let expected;
-    if (direction.value === 'en2cn') {
-      expected = word.cn;
-    } else {
-      expected = word.en;
-    }
+    const expected = word.en;
 
-    const userAnswer = (direction.value === 'en2cn') ? raw : raw.toLowerCase();
+    const userAnswer = raw.toLowerCase();
     const isCorrect = isMatch(userAnswer, expected);
 
     if (isCorrect) {
@@ -633,8 +723,8 @@
       answerInput.className = 'wrong';
       result.innerHTML = `<span class="wrong-hint">✗ 错误</span> &nbsp; 正确答案：<span class="correct-answer">${escapeHtml(expected)}</span>`;
       wrong++;
-      // Add to error bank
       addErrors([{ en: word.en, cn: word.cn }]);
+      answerInput.value = '';
     }
 
     btnNext.textContent = '下一题';
@@ -645,7 +735,6 @@
     const u = user.replace(/\s+/g, '').toLowerCase();
     const e = expected.replace(/\s+/g, '').toLowerCase();
     if (u === e) return true;
-    // Split by ；，,/ to allow matching any single meaning
     const parts = expected.split(/[；;，,、\/]/);
     for (const p of parts) {
       const clean = p.replace(/\s+/g, '').toLowerCase();
@@ -654,13 +743,25 @@
     return false;
   }
 
+
   function skipWord() {
     if (answered) return;
     answered = true;
     const word = words[currentIdx];
-    const expected = direction.value === 'en2cn' ? word.cn : word.en;
-    answerInput.className = 'wrong';
-    result.innerHTML = `正确答案：<span class="correct-answer">${escapeHtml(expected)}</span>`;
+
+    if (direction.value === 'en2cn') {
+      const buttons = choicesContainer.querySelectorAll('.choice-btn');
+      buttons.forEach(btn => btn.classList.add('revealed'));
+      if (correctChoiceIdx >= 0 && buttons[correctChoiceIdx]) {
+        buttons[correctChoiceIdx].classList.add('correct');
+      }
+      result.innerHTML = `正确答案：<span class="correct-answer">${escapeHtml(word.cn)}</span>`;
+    } else {
+      answerInput.className = 'wrong';
+      result.innerHTML = `正确答案：<span class="correct-answer">${escapeHtml(word.en)}</span>`;
+      answerInput.value = '';
+    }
+
     wrong++;
     addErrors([{ en: word.en, cn: word.cn }]);
     btnNext.textContent = '下一题';
@@ -696,13 +797,16 @@
 
   btnNext.addEventListener('click', function() {
     if (!answered) {
-      const raw = answerInput.value.trim();
-      if (raw) checkAnswer();
-      else skipWord();
+      if (direction.value === 'en2cn') {
+        skipWord();
+      } else {
+        const raw = answerInput.value.trim();
+        if (raw) checkAnswer();
+        else skipWord();
+      }
     } else {
       if (queue.length === 0 && answered) {
         if (isReviewMode) {
-          // Back to error bank
           quizArea.classList.add('hidden');
           uploadZone.classList.remove('hidden');
           isReviewMode = false;
