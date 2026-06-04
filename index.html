@@ -650,9 +650,6 @@
       [available[i], available[j]] = [available[j], available[i]];
     }
     queue = available.slice(0, count);
-    // Mark selected indices as used immediately
-    for (const idx of queue) usedIndices.add(idx);
-    saveUsedIndices();
 
     correct = 0;
     wrong = 0;
@@ -703,7 +700,6 @@
     btnNext.textContent = '跳过';
     btnNext.classList.remove('hidden');
     updateStats();
-    updateProgress();
   }
 
   function generateChoices(correctWord) {
@@ -752,6 +748,7 @@
 
   function selectChoice(ci, choices) {
     answered = true;
+    if (!isReviewMode) { usedIndices.add(currentIdx); saveUsedIndices(); }
     const word = words[currentIdx];
     const isCorrect = choices[ci].isCorrect;
 
@@ -784,6 +781,7 @@
     if (!raw) return;
 
     answered = true;
+    if (!isReviewMode) { usedIndices.add(currentIdx); saveUsedIndices(); }
     const word = words[currentIdx];
     const expected = word.en;
 
@@ -822,6 +820,7 @@
   function skipWord() {
     if (answered) return;
     answered = true;
+    if (!isReviewMode) { usedIndices.add(currentIdx); saveUsedIndices(); }
     const word = words[currentIdx];
 
     if (direction.value === 'en2cn') {
@@ -846,6 +845,7 @@
     correctCount.textContent = correct;
     wrongCount.textContent = wrong;
     remainCount.textContent = queue.length;
+    updateProgress();
   }
 
   function updateProgress() {
