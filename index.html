@@ -283,8 +283,16 @@
         <option value="en2cn">英→中</option>
         <option value="cn2en">中→英</option>
       </select>
+      <label>每轮</label>
+      <select id="roundSize">
+        <option value="10">10</option>
+        <option value="20">20</option>
+        <option value="30" selected>30</option>
+        <option value="50">50</option>
+      </select>
       <button class="btn-sm errbank" id="btnErrBank">📋 错题本</button>
       <span class="book-name" id="bookName"></span>
+      <button class="btn-sm" id="btnResetProgress">重新开始</button>
       <button class="btn-sm" id="btnReset">换词书</button>
     </div>
 
@@ -296,7 +304,7 @@
       <div class="result" id="result"></div>
       <button class="btn btn-primary" id="btnNext">下一题</button>
       <div class="progress-bar"><div class="fill" id="progressFill" style="width:0%"></div></div>
-      <div class="round-info">每轮 30 词</div>
+      <div class="round-info" id="roundInfo">每轮 30 词</div>
     </div>
 
     <div class="stats">
@@ -325,10 +333,10 @@
 
 <script>
 (function() {
-  const ROUND_SIZE = 30;
   const STORAGE_KEY = 'dictation_words3';
   const STORAGE_NAME = 'dictation_bookname3';
   const ERR_STORAGE = 'dictation_errors3';
+  const USED_STORAGE = 'dictation_used3';
 
   // --- DOM ---
   const splash = document.getElementById('splash');
@@ -342,6 +350,7 @@
   const btnClear = document.getElementById('btnClear');
   const quizArea = document.getElementById('quizArea');
   const direction = document.getElementById('direction');
+  const roundSize = document.getElementById('roundSize');
   const bookName = document.getElementById('bookName');
   const promptLabel = document.getElementById('promptLabel');
   const promptWord = document.getElementById('promptWord');
@@ -350,8 +359,10 @@
   const result = document.getElementById('result');
   const btnNext = document.getElementById('btnNext');
   const btnReset = document.getElementById('btnReset');
+  const btnResetProgress = document.getElementById('btnResetProgress');
   const btnErrBank = document.getElementById('btnErrBank');
   const progressFill = document.getElementById('progressFill');
+  const roundInfo = document.getElementById('roundInfo');
   const correctCount = document.getElementById('correctCount');
   const wrongCount = document.getElementById('wrongCount');
   const remainCount = document.getElementById('remainCount');
@@ -370,6 +381,7 @@
   let answered = false;
   let correctChoiceIdx = -1;
   let isReviewMode = false;
+  let usedIndices = new Set();
 
   // ===== Splash Screen =====
   function initSplash() {
@@ -438,6 +450,20 @@
       btnErrBank.classList.remove('has-items');
       btnErrBank.textContent = '📋 错题本';
     }
+  }
+
+  // ===== Used indices (no-repeat tracking) =====
+  function getUsedIndices() {
+    try { return new Set(JSON.parse(localStorage.getItem(USED_STORAGE)) || []); }
+    catch(e) { return new Set(); }
+  }
+  function saveUsedIndices() {
+    try { localStorage.setItem(USED_STORAGE, JSON.stringify([...usedIndices])); }
+    catch(e) {}
+  }
+  function clearUsedIndices() {
+    usedIndices.clear();
+    localStorage.removeItem(USED_STORAGE);
   }
 
   function renderErrList() {
@@ -559,6 +585,7 @@
     }
     isReviewMode = false;
     bookName.textContent = filename;
+    clearUsedIndices();
     saveToStorage();
     startQuiz();
   }
@@ -572,13 +599,61 @@
 
   function resetQueue() {
     const pool = words.length;
-    const count = Math.min(ROUND_SIZE, pool);
-    const indices = Array.from({ length: pool }, (_, i) => i);
-    for (let i = 0; i < count; i++) {
-      const j = i + Math.floor(Math.random() * (pool - i));
-      [indices[i], indices[j]] = [indices[j], indices[i]];
+
+    // Review mode: random selection, no no-repeat tracking
+    if (isReviewMode) {
+      const count = Math.min(Number(roundSize.value), pool);
+      const indices = Array.from({ length: pool }, (_, i) => i);
+      for (let i = 0; i < count; i++) {
+        const j = i + Math.floor(Math.random() * (pool - i));
+        [indices[i], indices[j]] = [indices[j], indices[i]];
+      }
+      queue = indices.slice(0, count);
+      correct = 0;
+      wrong = 0;
+      answered = false;
+      updateStats();
+      updateErrBtn();
+      nextWord();
+      return;
     }
-    queue = indices.slice(0, count);
+
+    // Normal mode: exclude already-used indices
+    const available = [];
+    for (let i = 0; i < pool; i++) {
+      if (!usedIndices.has(i)) available.push(i);
+    }
+
+    // All words have been reviewed — show completion in card
+    if (available.length === 0) {
+      usedIndices.clear();
+      saveUsedIndices();
+      promptWord.textContent = '🏆';
+      promptLabel.textContent = '词书全部背完！';
+      answerInput.classList.add('hidden');
+      choicesContainer.classList.add('hidden');
+      btnNext.textContent = '再来一轮';
+      result.innerHTML = '<span class="correct-answer">所有单词已过完一遍，点击"再来一轮"重新开始</span>';
+      progressFill.style.width = '100%';
+      remainCount.textContent = '0';
+      answered = true;
+      queue = [];
+      updateStats();
+      updateErrBtn();
+      return;
+    }
+
+    const count = Math.min(Number(roundSize.value), available.length);
+    // Fisher-Yates shuffle on available indices, pick first 'count'
+    for (let i = 0; i < count; i++) {
+      const j = i + Math.floor(Math.random() * (available.length - i));
+      [available[i], available[j]] = [available[j], available[i]];
+    }
+    queue = available.slice(0, count);
+    // Mark selected indices as used immediately
+    for (const idx of queue) usedIndices.add(idx);
+    saveUsedIndices();
+
     correct = 0;
     wrong = 0;
     answered = false;
@@ -763,7 +838,6 @@
     }
 
     wrong++;
-    addErrors([{ en: word.en, cn: word.cn }]);
     btnNext.textContent = '下一题';
     updateStats();
   }
@@ -775,9 +849,14 @@
   }
 
   function updateProgress() {
-    const total = Math.min(ROUND_SIZE, words.length);
+    const roundTotal = correct + wrong + queue.length;
     const done = correct + wrong;
-    progressFill.style.width = total > 0 ? (done / total * 100) + '%' : '0%';
+    progressFill.style.width = roundTotal > 0 ? (done / roundTotal * 100) + '%' : '0%';
+    const totalUsed = usedIndices.size;
+    const totalWords = words.length;
+    roundInfo.textContent = totalWords > 0
+      ? '已背 ' + totalUsed + ' / ' + totalWords + ' 词 · 每轮' + roundSize.value + '词'
+      : '每轮 ' + roundSize.value + ' 词';
   }
 
   function escapeHtml(s) {
@@ -793,6 +872,17 @@
       if (!answered) checkAnswer();
       else nextWord();
     }
+  });
+
+  // Keyboard shortcuts 1-4 for multiple choice
+  document.addEventListener('keydown', function(e) {
+    if (answered) return;
+    if (choicesContainer.classList.contains('hidden')) return;
+    const key = parseInt(e.key, 10);
+    if (key < 1 || key > 4) return;
+    e.preventDefault();
+    const btn = choicesContainer.querySelectorAll('.choice-btn')[key - 1];
+    if (btn) btn.click();
   });
 
   btnNext.addEventListener('click', function() {
@@ -822,11 +912,19 @@
   });
 
   direction.addEventListener('change', () => resetQueue());
+  roundSize.addEventListener('change', () => resetQueue());
+  btnResetProgress.addEventListener('click', () => {
+    if (confirm('确定要重新开始吗？背诵进度将归零。')) {
+      clearUsedIndices();
+      resetQueue();
+    }
+  });
   btnReset.addEventListener('click', () => {
     words = [];
     queue = [];
     isReviewMode = false;
     clearStorage();
+    clearUsedIndices();
     uploadZone.classList.remove('hidden');
     quizArea.classList.add('hidden');
     fileInput.value = '';
@@ -835,6 +933,7 @@
   // ===== Init =====
   initSplash();
   loadFromStorage();
+  usedIndices = getUsedIndices();
   updateErrBtn();
 })();
 </script>
