@@ -600,15 +600,14 @@
   function resetQueue() {
     const pool = words.length;
 
-    // Review mode: random selection, no no-repeat tracking
+    // Review mode: review ALL error words, not limited by roundSize
     if (isReviewMode) {
-      const count = Math.min(Number(roundSize.value), pool);
       const indices = Array.from({ length: pool }, (_, i) => i);
-      for (let i = 0; i < count; i++) {
+      for (let i = 0; i < pool; i++) {
         const j = i + Math.floor(Math.random() * (pool - i));
         [indices[i], indices[j]] = [indices[j], indices[i]];
       }
-      queue = indices.slice(0, count);
+      queue = indices.slice();
       correct = 0;
       wrong = 0;
       answered = false;
@@ -852,11 +851,15 @@
     const roundTotal = correct + wrong + queue.length;
     const done = correct + wrong;
     progressFill.style.width = roundTotal > 0 ? (done / roundTotal * 100) + '%' : '0%';
-    const totalUsed = usedIndices.size;
-    const totalWords = words.length;
-    roundInfo.textContent = totalWords > 0
-      ? '已背 ' + totalUsed + ' / ' + totalWords + ' 词 · 每轮' + roundSize.value + '词'
-      : '每轮 ' + roundSize.value + ' 词';
+    if (isReviewMode) {
+      roundInfo.textContent = '错题复习 · 共 ' + words.length + ' 词 · 进度 ' + done + ' / ' + roundTotal;
+    } else {
+      const totalUsed = usedIndices.size;
+      const totalWords = words.length;
+      roundInfo.textContent = totalWords > 0
+        ? '已背 ' + totalUsed + ' / ' + totalWords + ' 词 · 每轮' + roundSize.value + '词'
+        : '每轮 ' + roundSize.value + ' 词';
+    }
   }
 
   function escapeHtml(s) {
@@ -896,14 +899,6 @@
       }
     } else {
       if (queue.length === 0 && answered) {
-        if (isReviewMode) {
-          quizArea.classList.add('hidden');
-          uploadZone.classList.remove('hidden');
-          isReviewMode = false;
-          loadFromStorage();
-          words = JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]');
-          return;
-        }
         resetQueue();
         return;
       }
