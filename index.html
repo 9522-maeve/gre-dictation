@@ -462,6 +462,7 @@
   let correctChoiceIdx = -1;
   let isReviewMode = false;
   let reviewCorrectSet = new Set();
+  let reviewedSessionWords = new Set();
   let usedIndices = new Set();
 
   // ===== Splash Screen =====
@@ -597,6 +598,7 @@
     if (words.length === 0) {
       isReviewMode = false;
       reviewCorrectSet.clear();
+      reviewedSessionWords.clear();
       showToast('错题本已清空！', 'success');
       // Load original word bank if available
       try {
@@ -628,6 +630,7 @@
     if (errs.length === 0) { alert('错题本为空'); return; }
     words = errs.slice();
     isReviewMode = true;
+    reviewedSessionWords = new Set();
     bookName.textContent = '错题复习';
     closeErrBank();
     startQuiz();
@@ -722,11 +725,12 @@
   function resetQueue() {
     const pool = words.length;
 
-    // Review mode: pick roundSize words from error bank
+    // Review mode: pick roundSize words from error bank, skip already-reviewed this session
     if (isReviewMode) {
       if (pool === 0) {
         // All error words have been removed
         isReviewMode = false;
+        reviewedSessionWords.clear();
         showToast('错题本已清空！', 'success');
         // Load original word bank
         try {
@@ -744,13 +748,28 @@
         return;
       }
       reviewCorrectSet.clear();
-      const count = Math.min(Number(roundSize.value), pool);
-      const indices = Array.from({ length: pool }, (_, i) => i);
-      for (let i = 0; i < count; i++) {
-        const j = i + Math.floor(Math.random() * (pool - i));
-        [indices[i], indices[j]] = [indices[j], indices[i]];
+      // Build available indices: exclude words already reviewed this session
+      const available = [];
+      for (let i = 0; i < pool; i++) {
+        if (!reviewedSessionWords.has(words[i].en)) available.push(i);
       }
-      queue = indices.slice(0, count);
+      // All words reviewed this session — reset tracking and start fresh
+      if (available.length === 0) {
+        reviewedSessionWords.clear();
+        for (let i = 0; i < pool; i++) available.push(i);
+        showToast('错题本全部复习完毕，重新开始！', 'success');
+      }
+      const count = Math.min(Number(roundSize.value), available.length);
+      // Fisher-Yates shuffle on available, pick first count
+      for (let i = 0; i < count; i++) {
+        const j = i + Math.floor(Math.random() * (available.length - i));
+        [available[i], available[j]] = [available[j], available[i]];
+      }
+      queue = available.slice(0, count);
+      // Mark these words as reviewed in this session
+      for (let i = 0; i < count; i++) {
+        reviewedSessionWords.add(words[queue[i]].en);
+      }
       correct = 0;
       wrong = 0;
       answered = false;
@@ -1009,7 +1028,8 @@
     progressFill.style.width = roundTotal > 0 ? (done / roundTotal * 100) + '%' : '0%';
     if (isReviewMode) {
       const roundSizeVal = Number(roundSize.value);
-      roundInfo.textContent = '错题复习 · 本轮第 ' + Math.min(done + 1, roundSizeVal) + ' / ' + Math.min(roundTotal, roundSizeVal) + ' 词 · 错题本共 ' + words.length + ' 词';
+      const remaining = words.filter(function(w) { return !reviewedSessionWords.has(w.en); }).length;
+      roundInfo.textContent = '错题复习 · 本轮第 ' + Math.min(done + 1, roundSizeVal) + ' / ' + Math.min(roundTotal, roundSizeVal) + ' 词 · 剩余 ' + remaining + ' 词 · 错题本共 ' + words.length + ' 词';
     } else {
       const totalUsed = usedIndices.size;
       const totalWords = words.length;
@@ -1118,7 +1138,11 @@
       }
     } else {
       if (queue.length === 0 && answered) {
-        resetQueue();
+        if (isReviewMode) {
+          nextWord();
+        } else {
+          resetQueue();
+        }
         return;
       }
       nextWord();
