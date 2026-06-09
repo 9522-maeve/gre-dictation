@@ -589,7 +589,6 @@
   });
   btnReviewKeepAll.addEventListener('click', function() {
     closeReviewCompleteModal();
-    if (isReviewMode) resetQueue();
   });
   btnReviewRemove.addEventListener('click', function() {
     batchRemoveFromErrors();
@@ -723,15 +722,35 @@
   function resetQueue() {
     const pool = words.length;
 
-    // Review mode: review ALL error words, not limited by roundSize
+    // Review mode: pick roundSize words from error bank
     if (isReviewMode) {
+      if (pool === 0) {
+        // All error words have been removed
+        isReviewMode = false;
+        showToast('错题本已清空！', 'success');
+        // Load original word bank
+        try {
+          var saved = JSON.parse(localStorage.getItem('dictation_words3'));
+          if (saved && saved.length > 0) {
+            words = saved;
+            bookName.textContent = localStorage.getItem('dictation_bookname3') || '';
+            resetQueue();
+            return;
+          }
+        } catch(e) {}
+        uploadZone.classList.remove('hidden');
+        quizArea.classList.add('hidden');
+        updateErrBtn();
+        return;
+      }
       reviewCorrectSet.clear();
+      const count = Math.min(Number(roundSize.value), pool);
       const indices = Array.from({ length: pool }, (_, i) => i);
-      for (let i = 0; i < pool; i++) {
+      for (let i = 0; i < count; i++) {
         const j = i + Math.floor(Math.random() * (pool - i));
         [indices[i], indices[j]] = [indices[j], indices[i]];
       }
-      queue = indices.slice();
+      queue = indices.slice(0, count);
       correct = 0;
       wrong = 0;
       answered = false;
@@ -989,7 +1008,8 @@
     const done = correct + wrong;
     progressFill.style.width = roundTotal > 0 ? (done / roundTotal * 100) + '%' : '0%';
     if (isReviewMode) {
-      roundInfo.textContent = '错题复习 · 共 ' + words.length + ' 词 · 进度 ' + done + ' / ' + roundTotal;
+      const roundSizeVal = Number(roundSize.value);
+      roundInfo.textContent = '错题复习 · 本轮第 ' + Math.min(done + 1, roundSizeVal) + ' / ' + Math.min(roundTotal, roundSizeVal) + ' 词 · 错题本共 ' + words.length + ' 词';
     } else {
       const totalUsed = usedIndices.size;
       const totalWords = words.length;
@@ -1045,6 +1065,7 @@
 
   function closeReviewCompleteModal() {
     reviewCompleteModal.classList.add('hidden');
+    if (isReviewMode) resetQueue();
   }
 
   function batchRemoveFromErrors() {
