@@ -249,6 +249,45 @@
   .choice-btn.revealed { pointer-events: none; }
 
   .hidden { display: none !important; }
+
+  /* ===== Toast ===== */
+  .toast-container {
+    position: fixed; top: 20px; left: 50%; transform: translateX(-50%);
+    z-index: 200; display: flex; flex-direction: column; gap: 8px;
+    pointer-events: none;
+  }
+  .toast {
+    padding: 12px 24px; border-radius: 8px; font-size: 14px; font-weight: 600;
+    color: #fff; text-align: center; animation: toast-in .35s ease, toast-out .35s ease forwards;
+    animation-delay: 0s, 2s; pointer-events: auto;
+    box-shadow: 0 4px 16px rgba(0,0,0,.15);
+  }
+  .toast.success { background: var(--success); }
+  .toast.info { background: var(--accent); }
+  @keyframes toast-in { from { opacity: 0; transform: translateY(-16px); } to { opacity: 1; transform: translateY(0); } }
+  @keyframes toast-out { from { opacity: 1; } to { opacity: 0; } }
+
+  /* ===== Review Complete Modal ===== */
+  .review-complete-item {
+    display: flex; align-items: center; gap: 10px;
+    padding: 10px 0; border-bottom: 1px solid var(--border);
+  }
+  .review-complete-item input[type="checkbox"] {
+    width: 18px; height: 18px; accent-color: var(--accent); cursor: pointer; flex-shrink: 0;
+  }
+  .review-complete-item label {
+    flex: 1; cursor: pointer; display: flex; justify-content: space-between; align-items: center;
+  }
+  .review-complete-item .rc-word { font-weight: 600; }
+  .review-complete-item .rc-meaning { color: var(--muted); font-size: 14px; }
+  .review-complete-header {
+    display: flex; justify-content: space-between; align-items: center;
+    margin-bottom: 8px; padding-bottom: 8px; border-bottom: 1px solid var(--border);
+  }
+  .review-complete-header .select-all-btn {
+    font-size: 12px; color: var(--accent); cursor: pointer; border: none; background: none;
+  }
+  .review-complete-header .select-all-btn:hover { text-decoration: underline; }
 </style>
 </head>
 <body>
@@ -315,6 +354,9 @@
   </div>
 </div>
 
+<!-- Toast container -->
+<div class="toast-container" id="toastContainer"></div>
+
 <!-- Error Bank Modal -->
 <div class="modal-overlay hidden" id="errModal">
   <div class="modal">
@@ -327,6 +369,34 @@
       <button class="btn-clear-all" id="btnClearAll">清空全部</button>
       <button class="btn-cancel" id="btnErrCancel">关闭</button>
       <button class="btn-review" id="btnReview">复习错题</button>
+    </div>
+  </div>
+</div>
+
+<!-- Review Complete Modal -->
+<div class="modal-overlay hidden" id="reviewCompleteModal">
+  <div class="modal">
+    <div class="modal-header">
+      <h3>🎉 错题复习完成！</h3>
+      <button class="btn-close" id="btnReviewCompleteClose">×</button>
+    </div>
+    <div class="modal-body">
+      <div id="reviewCompleteStats" style="text-align:center;margin-bottom:16px;font-size:15px;"></div>
+      <div id="reviewCorrectSection" class="hidden">
+        <div class="review-complete-header">
+          <span style="font-size:14px;font-weight:600;">✓ 本次答对的词</span>
+          <button class="select-all-btn" id="btnSelectAll">全选 / 取消全选</button>
+        </div>
+        <div id="reviewCorrectList"></div>
+        <div style="font-size:13px;color:var(--muted);margin-top:8px;">勾选的词将从错题本中移除</div>
+      </div>
+      <div id="reviewNoCorrect" class="hidden" style="text-align:center;color:var(--muted);padding:20px 0;">
+        本次没有答对的词，继续加油！
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn-cancel" id="btnReviewKeepAll">全部保留</button>
+      <button class="btn-review" id="btnReviewRemove">移除选中并继续</button>
     </div>
   </div>
 </div>
@@ -370,6 +440,16 @@
   const errList = document.getElementById('errList');
   const btnErrClose = document.getElementById('btnErrClose');
   const btnErrCancel = document.getElementById('btnErrCancel');
+  const toastContainer = document.getElementById('toastContainer');
+  const reviewCompleteModal = document.getElementById('reviewCompleteModal');
+  const reviewCompleteStats = document.getElementById('reviewCompleteStats');
+  const reviewCorrectSection = document.getElementById('reviewCorrectSection');
+  const reviewCorrectList = document.getElementById('reviewCorrectList');
+  const reviewNoCorrect = document.getElementById('reviewNoCorrect');
+  const btnReviewCompleteClose = document.getElementById('btnReviewCompleteClose');
+  const btnReviewKeepAll = document.getElementById('btnReviewKeepAll');
+  const btnReviewRemove = document.getElementById('btnReviewRemove');
+  const btnSelectAll = document.getElementById('btnSelectAll');
   const btnClearAll = document.getElementById('btnClearAll');
   const btnReview = document.getElementById('btnReview');
 
@@ -381,6 +461,7 @@
   let answered = false;
   let correctChoiceIdx = -1;
   let isReviewMode = false;
+  let reviewCorrectSet = new Set();
   let usedIndices = new Set();
 
   // ===== Splash Screen =====
@@ -501,6 +582,48 @@
     if (getErrors().length === 0) return;
     if (confirm('确定要清空全部错题吗？')) clearErrors();
   });
+  // Review Complete Modal events
+  btnReviewCompleteClose.addEventListener('click', closeReviewCompleteModal);
+  reviewCompleteModal.addEventListener('click', function(e) {
+    if (e.target === reviewCompleteModal) closeReviewCompleteModal();
+  });
+  btnReviewKeepAll.addEventListener('click', function() {
+    closeReviewCompleteModal();
+    if (isReviewMode) resetQueue();
+  });
+  btnReviewRemove.addEventListener('click', function() {
+    batchRemoveFromErrors();
+    closeReviewCompleteModal();
+    words = getErrors();
+    if (words.length === 0) {
+      isReviewMode = false;
+      reviewCorrectSet.clear();
+      showToast('错题本已清空！', 'success');
+      // Load original word bank if available
+      try {
+        var saved = JSON.parse(localStorage.getItem('dictation_words3'));
+        if (saved && saved.length > 0) {
+          words = saved;
+          bookName.textContent = localStorage.getItem('dictation_bookname3') || '';
+          resetQueue();
+          return;
+        }
+      } catch(e) {}
+      // No word bank available — go back to upload
+      uploadZone.classList.remove('hidden');
+      quizArea.classList.add('hidden');
+      updateErrBtn();
+    } else if (isReviewMode) {
+      resetQueue();
+    }
+  });
+  btnSelectAll.addEventListener('click', function() {
+    var cbs = reviewCorrectList.querySelectorAll('input[type="checkbox"]');
+    var allChecked = true;
+    cbs.forEach(function(cb) { if (!cb.checked) allChecked = false; });
+    cbs.forEach(function(cb) { cb.checked = !allChecked; });
+  });
+
   btnReview.addEventListener('click', function() {
     const errs = getErrors();
     if (errs.length === 0) { alert('错题本为空'); return; }
@@ -602,6 +725,7 @@
 
     // Review mode: review ALL error words, not limited by roundSize
     if (isReviewMode) {
+      reviewCorrectSet.clear();
       const indices = Array.from({ length: pool }, (_, i) => i);
       for (let i = 0; i < pool; i++) {
         const j = i + Math.floor(Math.random() * (pool - i));
@@ -663,14 +787,25 @@
       promptWord.textContent = '🎉';
       const total = correct + wrong;
       const pct = total > 0 ? Math.round(correct / total * 100) : 0;
-      promptLabel.textContent = isReviewMode ? '错题复习完成！' : '本轮默写完成！';
+      if (isReviewMode) {
+        answerInput.classList.add('hidden');
+        choicesContainer.classList.add('hidden');
+        btnNext.textContent = '下一题';
+        progressFill.style.width = '100%';
+        remainCount.textContent = '0';
+        answered = true;
+        showReviewCompleteModal();
+        return;
+      }
+      promptLabel.textContent = '本轮默写完成！';
       answerInput.classList.add('hidden');
       choicesContainer.classList.add('hidden');
-      btnNext.textContent = isReviewMode ? '再来一轮错题' : '再来一轮';
+      btnNext.textContent = '再来一轮';
       result.innerHTML = `<span class="correct-answer">正确 ${correct} / ${total}（${pct}%）</span>`;
       progressFill.style.width = '100%';
       remainCount.textContent = '0';
       answered = true;
+      showToast('本轮完成！正确 ' + correct + ' / ' + total, 'success');
       return;
     }
 
@@ -764,6 +899,7 @@
     if (isCorrect) {
       result.innerHTML = '<span class="correct-answer">✓ 正确！</span>';
       correct++;
+      if (isReviewMode) reviewCorrectSet.add(currentIdx);
     } else {
       result.innerHTML = `<span class="wrong-hint">✗ 错误</span> &nbsp; 正确答案：<span class="correct-answer">${escapeHtml(word.cn)}</span>`;
       wrong++;
@@ -791,6 +927,7 @@
       answerInput.className = 'correct';
       result.innerHTML = '<span class="correct-answer">✓ 正确！</span>';
       correct++;
+      if (isReviewMode) reviewCorrectSet.add(currentIdx);
     } else {
       answerInput.className = 'wrong';
       result.innerHTML = `<span class="wrong-hint">✗ 错误</span> &nbsp; 正确答案：<span class="correct-answer">${escapeHtml(expected)}</span>`;
@@ -856,9 +993,10 @@
     } else {
       const totalUsed = usedIndices.size;
       const totalWords = words.length;
+      const roundSizeVal = Number(roundSize.value);
       roundInfo.textContent = totalWords > 0
-        ? '已背 ' + totalUsed + ' / ' + totalWords + ' 词 · 每轮' + roundSize.value + '词'
-        : '每轮 ' + roundSize.value + ' 词';
+        ? '已背 ' + totalUsed + ' / ' + totalWords + ' 词 · 本轮第 ' + Math.min(done + 1, roundSizeVal) + ' / ' + roundSizeVal + ' 词'
+        : '本轮 ' + roundSize.value + ' 词';
     }
   }
 
@@ -866,6 +1004,66 @@
     const div = document.createElement('div');
     div.textContent = s;
     return div.innerHTML;
+  }
+
+  // ===== Toast & Review Complete =====
+  let toastTimer = null;
+  function showToast(msg, type) {
+    if (toastTimer) { clearTimeout(toastTimer); }
+    const el = document.createElement('div');
+    el.className = 'toast ' + (type || 'info');
+    el.textContent = msg;
+    toastContainer.appendChild(el);
+    toastTimer = setTimeout(function() {
+      if (el.parentNode) el.parentNode.removeChild(el);
+      toastTimer = null;
+    }, 2400);
+  }
+
+  function showReviewCompleteModal() {
+    reviewCompleteStats.textContent = '正确 ' + correct + ' / ' + (correct + wrong) + '（' + Math.round(correct / (correct + wrong) * 100) + '%）';
+    var correctWords = [];
+    reviewCorrectSet.forEach(function(idx) { correctWords.push(words[idx]); });
+    if (correctWords.length > 0) {
+      reviewCorrectSection.classList.remove('hidden');
+      reviewNoCorrect.classList.add('hidden');
+      reviewCorrectList.innerHTML = correctWords.map(function(w) {
+        return '<div class="review-complete-item">' +
+          '<input type="checkbox" id="rc_' + escapeHtml(w.en) + '" checked>' +
+          '<label for="rc_' + escapeHtml(w.en) + '">' +
+            '<span class="rc-word">' + escapeHtml(w.en) + '</span>' +
+            '<span class="rc-meaning">' + escapeHtml(w.cn) + '</span>' +
+          '</label>' +
+        '</div>';
+      }).join('');
+    } else {
+      reviewCorrectSection.classList.add('hidden');
+      reviewNoCorrect.classList.remove('hidden');
+    }
+    reviewCompleteModal.classList.remove('hidden');
+  }
+
+  function closeReviewCompleteModal() {
+    reviewCompleteModal.classList.add('hidden');
+  }
+
+  function batchRemoveFromErrors() {
+    var checkboxes = reviewCorrectList.querySelectorAll('input[type="checkbox"]');
+    var toRemove = [];
+    checkboxes.forEach(function(cb) {
+      if (cb.checked) {
+        var en = cb.id.replace('rc_', '');
+        var div = document.createElement('div');
+        div.innerHTML = en;
+        toRemove.push(div.textContent);
+      }
+    });
+    var errs = getErrors().filter(function(e) { return toRemove.indexOf(e.en) === -1; });
+    saveErrors(errs);
+    updateErrBtn();
+    if (toRemove.length > 0) {
+      showToast('已从错题本移除 ' + toRemove.length + ' 个词', 'success');
+    }
   }
 
   // ===== Events =====
