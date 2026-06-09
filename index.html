@@ -1154,6 +1154,7 @@
   btnResetProgress.addEventListener('click', () => {
     if (confirm('确定要重新开始吗？背诵进度将归零。')) {
       clearUsedIndices();
+      reviewedSessionWords.clear();
       resetQueue();
     }
   });
