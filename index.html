@@ -228,6 +228,8 @@
   .btn-cancel:hover { background: var(--bg); }
   .btn-clear-all { background: transparent; border: 1px solid var(--danger); color: var(--danger); }
   .btn-clear-all:hover { background: #fef2f2; }
+  .btn-export { background: transparent; border: 1px solid var(--accent); color: var(--accent); }
+  .btn-export:hover { background: #f8f7ff; }
 
   /* ===== Multiple Choice ===== */
   .choices { display: flex; flex-direction: column; gap: 10px; margin-bottom: 20px; }
@@ -366,6 +368,7 @@
     </div>
     <div class="modal-body" id="errList"></div>
     <div class="modal-footer">
+      <button class="btn-export" id="btnExport">📤 导出</button>
       <button class="btn-clear-all" id="btnClearAll">清空全部</button>
       <button class="btn-cancel" id="btnErrCancel">关闭</button>
       <button class="btn-review" id="btnReview">复习错题</button>
@@ -450,6 +453,7 @@
   const btnReviewKeepAll = document.getElementById('btnReviewKeepAll');
   const btnReviewRemove = document.getElementById('btnReviewRemove');
   const btnSelectAll = document.getElementById('btnSelectAll');
+  const btnExport = document.getElementById('btnExport');
   const btnClearAll = document.getElementById('btnClearAll');
   const btnReview = document.getElementById('btnReview');
 
@@ -464,6 +468,8 @@
   let reviewCorrectSet = new Set();
   let reviewedSessionWords = new Set();
   let usedIndices = new Set();
+  let cumCorrect = 0;
+  let cumWrong = 0;
 
   // ===== Splash Screen =====
   function initSplash() {
@@ -523,6 +529,24 @@
     updateErrBtn();
     renderErrList();
   }
+  function exportErrors() {
+    const errs = getErrors();
+    if (errs.length === 0) {
+      showToast('错题本为空，无需导出', 'info');
+      return;
+    }
+    const content = errs.map(function(e) { return e.en + ' ' + e.cn; }).join('\n');
+    const blob = new Blob(['﻿' + content], { type: 'text/plain;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = '错题导出_' + new Date().toISOString().slice(0, 10) + '.txt';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    showToast('已导出 ' + errs.length + ' 个错题', 'success');
+  }
   function updateErrBtn() {
     const errs = getErrors();
     if (errs.length > 0) {
@@ -579,6 +603,7 @@
   errModal.addEventListener('click', function(e) {
     if (e.target === errModal) closeErrBank();
   });
+  btnExport.addEventListener('click', exportErrors);
   btnClearAll.addEventListener('click', function() {
     if (getErrors().length === 0) return;
     if (confirm('确定要清空全部错题吗？')) clearErrors();
@@ -711,6 +736,8 @@
     isReviewMode = false;
     bookName.textContent = filename;
     clearUsedIndices();
+    cumCorrect = 0;
+    cumWrong = 0;
     saveToStorage();
     startQuiz();
   }
@@ -724,6 +751,12 @@
 
   function resetQueue() {
     const pool = words.length;
+
+    // Accumulate completed round stats for cumulative tracking (normal mode only)
+    if (!isReviewMode && (correct + wrong) > 0) {
+      cumCorrect += correct;
+      cumWrong += wrong;
+    }
 
     // Review mode: pick roundSize words from error bank, skip already-reviewed this session
     if (isReviewMode) {
@@ -789,16 +822,22 @@
     if (available.length === 0) {
       usedIndices.clear();
       saveUsedIndices();
+      const totalCum = cumCorrect + cumWrong;
+      const pctCum = totalCum > 0 ? Math.round(cumCorrect / totalCum * 100) : 0;
       promptWord.textContent = '🏆';
       promptLabel.textContent = '词书全部背完！';
       answerInput.classList.add('hidden');
       choicesContainer.classList.add('hidden');
       btnNext.textContent = '再来一轮';
-      result.innerHTML = '<span class="correct-answer">所有单词已过完一遍，点击"再来一轮"重新开始</span>';
+      result.innerHTML = '<span class="correct-answer">所有单词已过完一遍</span>' +
+        '<br><span style="font-size:14px;color:var(--muted);">总正确率：' + cumCorrect + ' / ' + totalCum + '（' + pctCum + '%）</span>' +
+        '<br><span style="font-size:13px;color:var(--muted);">点击"再来一轮"重新开始</span>';
       progressFill.style.width = '100%';
       remainCount.textContent = '0';
       answered = true;
       queue = [];
+      correct = 0;
+      wrong = 0;
       updateStats();
       updateErrBtn();
       return;
@@ -1155,6 +1194,8 @@
     if (confirm('确定要重新开始吗？背诵进度将归零。')) {
       clearUsedIndices();
       reviewedSessionWords.clear();
+      cumCorrect = 0;
+      cumWrong = 0;
       resetQueue();
     }
   });
