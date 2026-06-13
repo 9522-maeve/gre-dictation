@@ -290,6 +290,31 @@
     font-size: 12px; color: var(--accent); cursor: pointer; border: none; background: none;
   }
   .review-complete-header .select-all-btn:hover { text-decoration: underline; }
+
+  /* ===== Round Complete Modal ===== */
+  .round-complete-stats {
+    text-align: center; margin-bottom: 16px; font-size: 15px;
+  }
+  .round-complete-actions {
+    display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; margin-bottom: 12px;
+  }
+  .round-complete-actions button {
+    padding: 10px 20px; font-size: 14px; border-radius: 8px; cursor: pointer; border: none; font-weight: 600;
+  }
+  .btn-mistake-review { background: var(--danger); color: #fff; }
+  .btn-mistake-review:hover { background: #b91c1c; }
+  .btn-mistake-review:disabled { background: #ccc; cursor: not-allowed; }
+  .btn-select-review { background: var(--accent); color: #fff; }
+  .btn-select-review:hover { background: var(--accent-hover); }
+  .btn-skip-round { background: var(--card); border: 1px solid var(--border) !important; color: var(--text); }
+  .btn-skip-round:hover { background: var(--bg); }
+  .round-select-section { border-top: 1px solid var(--border); padding-top: 12px; }
+  .round-select-section .select-actions {
+    display: flex; gap: 10px; justify-content: flex-end; margin-top: 12px;
+  }
+  .round-select-section .select-actions button {
+    padding: 8px 18px; font-size: 14px; border-radius: 6px; cursor: pointer;
+  }
 </style>
 </head>
 <body>
@@ -404,6 +429,37 @@
   </div>
 </div>
 
+<!-- Round Complete Modal -->
+<div class="modal-overlay hidden" id="roundCompleteModal">
+  <div class="modal">
+    <div class="modal-header">
+      <h3>🎉 本轮完成！</h3>
+      <button class="btn-close" id="btnRoundCompleteClose">×</button>
+    </div>
+    <div class="modal-body">
+      <div class="round-complete-stats" id="roundCompleteStats"></div>
+      <div id="roundCompleteMain">
+        <div class="round-complete-actions">
+          <button class="btn-mistake-review" id="btnRoundMistakeReview">📝 背本轮错题</button>
+          <button class="btn-select-review" id="btnRoundSelectWords">🔍 选词背诵</button>
+          <button class="btn-skip-round" id="btnRoundSkip">⏭ 继续下一轮</button>
+        </div>
+      </div>
+      <div id="roundSelectSection" class="round-select-section hidden">
+        <div class="review-complete-header">
+          <span style="font-size:14px;font-weight:600;">选择要复习的词</span>
+          <button class="select-all-btn" id="btnRoundSelectAll">全选 / 取消全选</button>
+        </div>
+        <div id="roundSelectList"></div>
+        <div class="select-actions">
+          <button class="btn-cancel" id="btnRoundSelectBack">返回</button>
+          <button class="btn-review" id="btnRoundSelectStart">开始背诵</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
 <script>
 (function() {
   const STORAGE_KEY = 'dictation_words3';
@@ -456,6 +512,18 @@
   const btnExport = document.getElementById('btnExport');
   const btnClearAll = document.getElementById('btnClearAll');
   const btnReview = document.getElementById('btnReview');
+  const roundCompleteModal = document.getElementById('roundCompleteModal');
+  const roundCompleteStats = document.getElementById('roundCompleteStats');
+  const roundCompleteMain = document.getElementById('roundCompleteMain');
+  const roundSelectSection = document.getElementById('roundSelectSection');
+  const roundSelectList = document.getElementById('roundSelectList');
+  const btnRoundCompleteClose = document.getElementById('btnRoundCompleteClose');
+  const btnRoundMistakeReview = document.getElementById('btnRoundMistakeReview');
+  const btnRoundSelectWords = document.getElementById('btnRoundSelectWords');
+  const btnRoundSkip = document.getElementById('btnRoundSkip');
+  const btnRoundSelectAll = document.getElementById('btnRoundSelectAll');
+  const btnRoundSelectBack = document.getElementById('btnRoundSelectBack');
+  const btnRoundSelectStart = document.getElementById('btnRoundSelectStart');
 
   let words = [];
   let queue = [];
@@ -470,6 +538,10 @@
   let usedIndices = new Set();
   let cumCorrect = 0;
   let cumWrong = 0;
+  let roundMistakes = [];
+  let roundWords = [];
+  let roundReviewMode = false;
+  let preReviewState = null;
 
   // ===== Splash Screen =====
   function initSplash() {
@@ -750,10 +822,13 @@
   }
 
   function resetQueue() {
+    if (!roundCompleteModal.classList.contains('hidden')) {
+      roundCompleteModal.classList.add('hidden');
+    }
     const pool = words.length;
 
     // Accumulate completed round stats for cumulative tracking (normal mode only)
-    if (!isReviewMode && (correct + wrong) > 0) {
+    if (!isReviewMode && !roundReviewMode && (correct + wrong) > 0) {
       cumCorrect += correct;
       cumWrong += wrong;
     }
@@ -805,6 +880,8 @@
       }
       correct = 0;
       wrong = 0;
+      roundMistakes = [];
+      roundWords = [];
       answered = false;
       updateStats();
       updateErrBtn();
@@ -838,6 +915,8 @@
       queue = [];
       correct = 0;
       wrong = 0;
+      roundMistakes = [];
+      roundWords = [];
       updateStats();
       updateErrBtn();
       return;
@@ -853,6 +932,8 @@
 
     correct = 0;
     wrong = 0;
+    roundMistakes = [];
+    roundWords = [];
     answered = false;
     updateStats();
     updateErrBtn();
@@ -874,6 +955,17 @@
         showReviewCompleteModal();
         return;
       }
+      if (roundReviewMode) {
+        answerInput.classList.add('hidden');
+        choicesContainer.classList.add('hidden');
+        btnNext.textContent = '下一题';
+        progressFill.style.width = '100%';
+        remainCount.textContent = '0';
+        answered = true;
+        showToast('复习完成！正确 ' + correct + ' / ' + total, 'success');
+        endRoundReview();
+        return;
+      }
       promptLabel.textContent = '本轮默写完成！';
       answerInput.classList.add('hidden');
       choicesContainer.classList.add('hidden');
@@ -882,13 +974,16 @@
       progressFill.style.width = '100%';
       remainCount.textContent = '0';
       answered = true;
-      showToast('本轮完成！正确 ' + correct + ' / ' + total, 'success');
+      showRoundCompleteModal();
       return;
     }
 
     answered = false;
     currentIdx = queue.pop();
     const word = words[currentIdx];
+    if (!isReviewMode && !roundReviewMode) {
+      roundWords.push({ en: word.en, cn: word.cn });
+    }
 
     choicesContainer.innerHTML = '';
     choicesContainer.classList.add('hidden');
@@ -959,7 +1054,7 @@
 
   function selectChoice(ci, choices) {
     answered = true;
-    if (!isReviewMode) { usedIndices.add(currentIdx); saveUsedIndices(); }
+    if (!isReviewMode && !roundReviewMode) { usedIndices.add(currentIdx); saveUsedIndices(); }
     const word = words[currentIdx];
     const isCorrect = choices[ci].isCorrect;
 
@@ -981,6 +1076,9 @@
       result.innerHTML = `<span class="wrong-hint">✗ 错误</span> &nbsp; 正确答案：<span class="correct-answer">${escapeHtml(word.cn)}</span>`;
       wrong++;
       addErrors([{ en: word.en, cn: word.cn }]);
+      if (!isReviewMode && !roundReviewMode) {
+        roundMistakes.push({ en: word.en, cn: word.cn });
+      }
     }
 
     btnNext.textContent = '下一题';
@@ -993,7 +1091,7 @@
     if (!raw) return;
 
     answered = true;
-    if (!isReviewMode) { usedIndices.add(currentIdx); saveUsedIndices(); }
+    if (!isReviewMode && !roundReviewMode) { usedIndices.add(currentIdx); saveUsedIndices(); }
     const word = words[currentIdx];
     const expected = word.en;
 
@@ -1010,6 +1108,9 @@
       result.innerHTML = `<span class="wrong-hint">✗ 错误</span> &nbsp; 正确答案：<span class="correct-answer">${escapeHtml(expected)}</span>`;
       wrong++;
       addErrors([{ en: word.en, cn: word.cn }]);
+      if (!isReviewMode && !roundReviewMode) {
+        roundMistakes.push({ en: word.en, cn: word.cn });
+      }
       answerInput.value = '';
     }
 
@@ -1033,7 +1134,7 @@
   function skipWord() {
     if (answered) return;
     answered = true;
-    if (!isReviewMode) { usedIndices.add(currentIdx); saveUsedIndices(); }
+    if (!isReviewMode && !roundReviewMode) { usedIndices.add(currentIdx); saveUsedIndices(); }
     const word = words[currentIdx];
 
     if (direction.value === 'en2cn') {
@@ -1050,6 +1151,9 @@
     }
 
     wrong++;
+    if (!isReviewMode && !roundReviewMode) {
+      roundMistakes.push({ en: word.en, cn: word.cn });
+    }
     btnNext.textContent = '下一题';
     updateStats();
   }
@@ -1069,6 +1173,8 @@
       const roundSizeVal = Number(roundSize.value);
       const remaining = words.filter(function(w) { return !reviewedSessionWords.has(w.en); }).length;
       roundInfo.textContent = '错题复习 · 本轮第 ' + Math.min(done + 1, roundSizeVal) + ' / ' + Math.min(roundTotal, roundSizeVal) + ' 词 · 剩余 ' + remaining + ' 词 · 错题本共 ' + words.length + ' 词';
+    } else if (roundReviewMode) {
+      roundInfo.textContent = '本轮复习 · 第 ' + Math.min(done + 1, roundTotal) + ' / ' + roundTotal + ' 词';
     } else {
       const totalUsed = usedIndices.size;
       const totalWords = words.length;
@@ -1146,6 +1252,115 @@
     }
   }
 
+  // ===== Round Complete Modal =====
+  function showRoundCompleteModal() {
+    const total = correct + wrong;
+    const pct = total > 0 ? Math.round(correct / total * 100) : 0;
+    roundCompleteStats.innerHTML = '正确 <b>' + correct + '</b> / ' + total + '（' + pct + '%）';
+
+    // Show/hide mistake review button based on whether there are mistakes
+    btnRoundMistakeReview.disabled = roundMistakes.length === 0;
+
+    // Reset to main view
+    roundCompleteMain.classList.remove('hidden');
+    roundSelectSection.classList.add('hidden');
+
+    roundCompleteModal.classList.remove('hidden');
+  }
+
+  function closeRoundCompleteModal() {
+    roundCompleteModal.classList.add('hidden');
+    resetQueue();
+  }
+
+  function startRoundReview(wordList) {
+    if (wordList.length === 0) { showToast('没有可复习的词', 'info'); return; }
+    // Save current state
+    preReviewState = {
+      words: words,
+      isReviewMode: isReviewMode,
+      bookName: bookName.textContent,
+      roundSize: roundSize.value
+    };
+    roundReviewMode = true;
+    words = wordList.slice();
+    isReviewMode = false;
+    bookName.textContent = '本轮复习';
+    roundSize.value = String(wordList.length);
+    reviewCorrectSet.clear();
+    roundMistakes = [];
+    roundWords = [];
+    roundCompleteModal.classList.add('hidden');
+    resetQueue();
+  }
+
+  function endRoundReview() {
+    if (!preReviewState) return;
+    roundReviewMode = false;
+    words = preReviewState.words;
+    isReviewMode = preReviewState.isReviewMode;
+    bookName.textContent = preReviewState.bookName;
+    roundSize.value = preReviewState.roundSize;
+    preReviewState = null;
+    roundMistakes = [];
+    roundWords = [];
+    resetQueue();
+  }
+
+  // Round Complete Modal events
+  btnRoundCompleteClose.addEventListener('click', closeRoundCompleteModal);
+  roundCompleteModal.addEventListener('click', function(e) {
+    if (e.target === roundCompleteModal) closeRoundCompleteModal();
+  });
+  btnRoundSkip.addEventListener('click', closeRoundCompleteModal);
+
+  btnRoundMistakeReview.addEventListener('click', function() {
+    if (roundMistakes.length === 0) return;
+    startRoundReview(roundMistakes);
+  });
+
+  btnRoundSelectWords.addEventListener('click', function() {
+    // Show word selection view
+    roundCompleteMain.classList.add('hidden');
+    roundSelectSection.classList.remove('hidden');
+    roundSelectList.innerHTML = roundWords.map(function(w, i) {
+      return '<div class="review-complete-item">' +
+        '<input type="checkbox" id="rsw_' + i + '" checked>' +
+        '<label for="rsw_' + i + '">' +
+          '<span class="rc-word">' + escapeHtml(w.en) + '</span>' +
+          '<span class="rc-meaning">' + escapeHtml(w.cn) + '</span>' +
+        '</label>' +
+      '</div>';
+    }).join('');
+  });
+
+  btnRoundSelectBack.addEventListener('click', function() {
+    roundCompleteMain.classList.remove('hidden');
+    roundSelectSection.classList.add('hidden');
+  });
+
+  btnRoundSelectAll.addEventListener('click', function() {
+    var cbs = roundSelectList.querySelectorAll('input[type="checkbox"]');
+    var allChecked = true;
+    cbs.forEach(function(cb) { if (!cb.checked) allChecked = false; });
+    cbs.forEach(function(cb) { cb.checked = !allChecked; });
+  });
+
+  btnRoundSelectStart.addEventListener('click', function() {
+    var cbs = roundSelectList.querySelectorAll('input[type="checkbox"]');
+    var selected = [];
+    cbs.forEach(function(cb, i) {
+      if (cb.checked && roundWords[i]) {
+        selected.push(roundWords[i]);
+      }
+    });
+    if (selected.length === 0) {
+      showToast('请至少选择一个词', 'info');
+      return;
+    }
+    startRoundReview(selected);
+  });
+
   // ===== Events =====
   answerInput.addEventListener('keydown', function(e) {
     if (e.key === 'Enter') {
@@ -1167,6 +1382,10 @@
   });
 
   btnNext.addEventListener('click', function() {
+    if (!roundCompleteModal.classList.contains('hidden')) {
+      closeRoundCompleteModal();
+      return;
+    }
     if (!answered) {
       if (direction.value === 'en2cn') {
         skipWord();
@@ -1177,7 +1396,7 @@
       }
     } else {
       if (queue.length === 0 && answered) {
-        if (isReviewMode) {
+        if (isReviewMode || roundReviewMode) {
           nextWord();
         } else {
           resetQueue();
@@ -1189,7 +1408,6 @@
   });
 
   direction.addEventListener('change', () => resetQueue());
-  roundSize.addEventListener('change', () => resetQueue());
   btnResetProgress.addEventListener('click', () => {
     if (confirm('确定要重新开始吗？背诵进度将归零。')) {
       clearUsedIndices();
